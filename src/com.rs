@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use winapi::shared::minwindef::LPVOID;
 use winapi::shared::{
-    winerror::{E_POINTER, HRESULT},
+    winerror::HRESULT,
     wtypesbase::{CLSCTX, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER},
 };
 use winapi::um::{
@@ -293,9 +293,10 @@ macro_rules! com_call {
 /// If the call returns a failure `HRESULT`, return an error.
 ///
 /// # Nulls and Enumerators
-/// If the call succeeds but the resulting interface pointer is null, this will return an
-/// `HResult` error set to `E_POINTER`. This can happen particularly with enumeration
-/// interfaces, which return `S_FALSE` when they write less than the requested number of results.
+/// If the method succeeds but the resulting interface pointer is null, this will return an
+/// `HResult` error with the successful return code. In particular this can happen with
+/// enumeration interfaces, which return `S_FALSE` when they write less than the requested number
+/// of results.
 pub fn get<I, F>(getter: F) -> Result<ComRef<I>, HResult>
 where
     I: Interface,
@@ -303,11 +304,10 @@ where
 {
     let mut interface: *mut I = ptr::null_mut();
 
-    // Throw away successful HRESULT.
-    succeeded_or_err(getter(&mut interface as *mut *mut I))?;
+    let hr = succeeded_or_err(getter(&mut interface as *mut *mut I))?;
 
     if interface.is_null() {
-        Err(HResult::new(E_POINTER))
+        Err(HResult::new(hr))
     } else {
         Ok(unsafe { ComRef::from_raw(interface) })
     }
@@ -320,9 +320,10 @@ where
 /// macro usage.
 ///
 /// # Nulls and Enumerators
-/// If the call succeeds but the resulting interface pointer is null, this will return an
-/// `HResult` error set to `E_POINTER`. This can happen particularly with enumeration
-/// interfaces, which return `S_FALSE` when they write less than the requested number of results.
+/// If the method succeeds but the resulting interface pointer is null, this will return an
+/// `HResult` error with the successful return code. In particular this can happen with
+/// enumeration interfaces, which return `S_FALSE` when they write less than the requested number
+/// of results.
 ///
 /// # Example
 ///
@@ -359,19 +360,18 @@ macro_rules! com_call_getter {
 /// If the call returns a failure `HRESULT`, return an error.
 ///
 /// # Nulls
-/// If the call succeeds but the resulting interface pointer is null, this will return an
-/// `HResult` error set to `E_POINTER`.
+/// If the method succeeds but the resulting pointer is null, this will return an `HResult`
+/// error with the successful return code.
 pub fn get_cotaskmem<F, T>(getter: F) -> Result<CoTaskMem, HResult>
 where
     F: FnOnce(*mut *mut T) -> HRESULT,
 {
     let mut ptr = ptr::null_mut() as *mut T;
 
-    // Throw away successful HRESULT.
-    succeeded_or_err(getter(&mut ptr))?;
+    let hr = succeeded_or_err(getter(&mut ptr))?;
 
     if ptr.is_null() {
-        Err(HResult::new(E_POINTER))
+        Err(HResult::new(hr))
     } else {
         Ok(unsafe { CoTaskMem::wrap(ptr as LPVOID).unwrap() })
     }
@@ -384,8 +384,8 @@ where
 /// the name of the interface and method, and the file name and line number of the macro usage.
 ///
 /// # Nulls
-/// If the call succeeds but the resulting interface pointer is null, this will return an
-/// `HResult` error set to `E_POINTER`.
+/// If the method succeeds but the resulting pointer is null, this will return an `HResult`
+/// error with the successful return code.
 ///
 /// # Example
 ///
