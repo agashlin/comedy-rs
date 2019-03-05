@@ -14,8 +14,7 @@ use winapi::shared::minwindef::DWORD;
 use winapi::shared::winerror::{FACILITY_WIN32, HRESULT, HRESULT_FROM_WIN32, SUCCEEDED};
 use winapi::um::errhandlingapi::GetLastError;
 
-/// A (Win32 error code)
-/// [https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d],
+/// A [Win32 error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d),
 /// usually from `GetLastError()`.
 ///
 /// Includes optional function name, source file name, and line number.
@@ -29,8 +28,7 @@ pub struct Win32Error {
     pub file_line: Option<FileLine>,
 }
 
-/// An (HRESULT error code)
-/// [https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a].
+/// An [HRESULT error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a).
 /// These usually come from COM APIs.
 ///
 /// Includes optional function name, source file name, and line number.
