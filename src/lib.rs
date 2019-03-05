@@ -6,6 +6,8 @@
 #![cfg(windows)]
 
 //! Windows error handling, COM, and handles
+//!
+//! See macros for examples.
 
 extern crate failure;
 extern crate failure_derive;
@@ -15,6 +17,4 @@ pub mod com;
 pub mod error;
 pub mod handle;
 
-pub use error::Error;
-pub use error::Result;
-pub use error::ResultExt;
+pub use error::{HResult, ResultExt, Win32Error};

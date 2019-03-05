@@ -9,11 +9,10 @@
 //! This works with the `Class` and `Interface` traits from the `winapi` crate.
 
 use std::marker::PhantomData;
-use std::mem::forget;
+use std::mem;
 use std::ops::Deref;
 use std::ptr::{self, null_mut, NonNull};
 use std::rc::Rc;
-use std::result;
 
 use winapi::shared::minwindef::LPVOID;
 use winapi::shared::{
@@ -28,47 +27,47 @@ use winapi::um::{
 use winapi::{Class, Interface};
 
 use check_succeeded;
-use error::{succeeded_or_err, Error, ErrorCode::*, Result, ResultExt};
+use error::{succeeded_or_err, HResult, ResultExt};
 use handle::CoTaskMem;
 
-/// ComPtr to wrap COM interfaces sanely
+/// Wrap COM interfaces sanely
 ///
-/// Originally from [wio-rs](https://github.com/retep998/wio-rs) b895086
+/// Originally from [wio-rs](https://github.com/retep998/wio-rs) `ComPtr`
 #[repr(transparent)]
-pub struct ComPtr<T>(NonNull<T>)
+pub struct ComRef<T>(NonNull<T>)
 where
     T: Interface;
-impl<T> ComPtr<T>
+impl<T> ComRef<T>
 where
     T: Interface,
 {
-    /// Creates a `ComPtr` to wrap a raw pointer.
+    /// Creates a `ComRef` to wrap a raw pointer.
     /// It takes ownership over the pointer which means it does __not__ call `AddRef`.
     /// `T` __must__ be a COM interface that inherits from `IUnknown`.
-    pub unsafe fn from_raw(ptr: *mut T) -> ComPtr<T> {
-        ComPtr(NonNull::new(ptr).expect("ptr should not be null"))
+    pub unsafe fn from_raw(ptr: *mut T) -> ComRef<T> {
+        ComRef(NonNull::new(ptr).expect("ptr should not be null"))
     }
     /// Casts up the inheritance chain
-    pub fn up<U>(self) -> ComPtr<U>
+    pub fn up<U>(self) -> ComRef<U>
     where
         T: Deref<Target = U>,
         U: Interface,
     {
-        unsafe { ComPtr::from_raw(self.into_raw() as *mut U) }
+        unsafe { ComRef::from_raw(self.into_raw() as *mut U) }
     }
     /// Extracts the raw pointer.
     /// You are now responsible for releasing it yourself.
     pub fn into_raw(self) -> *mut T {
         let p = self.0.as_ptr();
-        forget(self);
+        mem::forget(self);
         p
     }
-    /// For internal use only.
+    #[doc(hide)]
     fn as_unknown(&self) -> &IUnknown {
         unsafe { &*(self.as_raw() as *mut IUnknown) }
     }
-    /// Performs QueryInterface fun.
-    pub fn cast<U>(&self) -> result::Result<ComPtr<U>, i32>
+    /// Get another interface via QueryInterface.
+    pub fn cast<U>(&self) -> Result<ComRef<U>, HRESULT>
     where
         U: Interface,
     {
@@ -77,15 +76,15 @@ where
         if err < 0 {
             return Err(err);
         }
-        Ok(unsafe { ComPtr::from_raw(obj as *mut U) })
+        Ok(unsafe { ComRef::from_raw(obj as *mut U) })
     }
     /// Obtains the raw pointer without transferring ownership.
-    /// Do __not__ release this pointer because it is still owned by the `ComPtr`.
+    /// Do __not__ release this pointer because it is still owned by the `ComRef`.
     pub fn as_raw(&self) -> *mut T {
         self.0.as_ptr()
     }
 }
-impl<T> Deref for ComPtr<T>
+impl<T> Deref for ComRef<T>
 where
     T: Interface,
 {
@@ -94,18 +93,18 @@ where
         unsafe { &*self.as_raw() }
     }
 }
-impl<T> Clone for ComPtr<T>
+impl<T> Clone for ComRef<T>
 where
     T: Interface,
 {
     fn clone(&self) -> Self {
         unsafe {
             self.as_unknown().AddRef();
-            ComPtr::from_raw(self.as_raw())
+            ComRef::from_raw(self.as_raw())
         }
     }
 }
-impl<T> Drop for ComPtr<T>
+impl<T> Drop for ComRef<T>
 where
     T: Interface,
 {
@@ -115,11 +114,11 @@ where
         }
     }
 }
-impl<T> PartialEq<ComPtr<T>> for ComPtr<T>
+impl<T> PartialEq<ComRef<T>> for ComRef<T>
 where
     T: Interface,
 {
-    fn eq(&self, other: &ComPtr<T>) -> bool {
+    fn eq(&self, other: &ComRef<T>) -> bool {
         self.0 == other.0
     }
 }
@@ -140,14 +139,14 @@ pub struct ComApartmentScope {
 
 impl ComApartmentScope {
     /// This thread should be the sole occupant of a single thread apartment
-    pub fn init_sta() -> Result<Self> {
+    pub fn init_sta() -> Result<Self, HResult> {
         unsafe { check_succeeded!(CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED)) }?;
 
         Ok(Default::default())
     }
 
     /// This thread should join the process's multithreaded apartment
-    pub fn init_mta() -> Result<Self> {
+    pub fn init_mta() -> Result<Self, HResult> {
         unsafe { check_succeeded!(CoInitializeEx(ptr::null_mut(), COINIT_MULTITHREADED)) }?;
 
         Ok(Default::default())
@@ -182,7 +181,7 @@ thread_local! {
     ///     Ok(())
     /// }).unwrap()
     /// ```
-    pub static INIT_STA: Result<ComApartmentScope> = ComApartmentScope::init_sta();
+    pub static INIT_STA: Result<ComApartmentScope, HResult> = ComApartmentScope::init_sta();
 
     /// A multithreaded apartment scope for the duration of the current thread.
     ///
@@ -202,7 +201,7 @@ thread_local! {
     ///     Ok(())
     /// }).unwrap()
     /// ```
-    pub static INIT_MTA: Result<ComApartmentScope> = ComApartmentScope::init_mta();
+    pub static INIT_MTA: Result<ComApartmentScope, HResult> = ComApartmentScope::init_mta();
 }
 
 /// Create an instance of a COM class.
@@ -210,7 +209,7 @@ thread_local! {
 /// This is mostly just a call to `CoCreateInstance` with some error handling.
 /// The CLSID of the class and the IID of the interface come from the winapi `RIDL` macro, which
 /// defines `Class` and `Interface` implementations.
-pub fn create_instance<C, I>(ctx: CLSCTX) -> Result<ComPtr<I>>
+pub fn create_instance<C, I>(ctx: CLSCTX) -> Result<ComRef<I>, HResult>
 where
     C: Class,
     I: Interface,
@@ -228,7 +227,7 @@ where
 }
 
 /// Create an instance of a COM class in the current process (`CLSCTX_LOCAL_SERVER`).
-pub fn create_instance_local_server<C, I>() -> Result<ComPtr<I>>
+pub fn create_instance_local_server<C, I>() -> Result<ComRef<I>, HResult>
 where
     C: Class,
     I: Interface,
@@ -238,7 +237,7 @@ where
 
 /// Create an instance of a COM class in a separate process space on the same machine
 /// (`CLSCTX_INPROC_SERVER`).
-pub fn create_instance_inproc_server<C, I>() -> Result<ComPtr<I>>
+pub fn create_instance_inproc_server<C, I>() -> Result<ComRef<I>, HResult>
 where
     C: Class,
     I: Interface,
@@ -246,17 +245,15 @@ where
     create_instance::<C, I>(CLSCTX_INPROC_SERVER)
 }
 
-/// Get an interface of type `J` via `IUnknown::QueryInterface()`.
-pub fn cast<I, J>(interface: &ComPtr<I>) -> Result<ComPtr<J>>
+/// Get an interface of type `U` via `IUnknown::QueryInterface()`.
+pub fn cast<T, U>(interface: &ComRef<T>) -> Result<ComRef<U>, HResult>
 where
-    I: Interface,
-    J: Interface,
+    T: Interface,
+    U: Interface,
 {
-    interface.cast().map_err(|hr| Error {
-        code: Some(HResult(hr)),
-        function: Some("IUnknown::QueryInterface"),
-        file_line: None,
-    })
+    interface
+        .cast()
+        .map_err(|hr| HResult::new(hr).function("IUnknown::QueryInterface"))
 }
 
 /// Call a COM method, returning a `Result`.
@@ -269,7 +266,7 @@ where
 /// # Example
 ///
 /// ```ignore
-/// fn cancel_job(job: &ComPtr<IBackgroundCopyJob>) -> Result<()> {
+/// fn cancel_job(job: &ComRef<IBackgroundCopyJob>) -> Result<(), HResult> {
 ///     unsafe {
 ///         com_call!(job, IBackgroundCopyJob::Cancel())
 ///     }
@@ -293,8 +290,13 @@ macro_rules! com_call {
 
 /// Get an interface pointer that is returned through an output parameter.
 ///
-/// If the call returns a failure `HRESULT`, or the interface pointer is null, return an error.
-pub fn get<I, F>(getter: F) -> Result<ComPtr<I>>
+/// If the call returns a failure `HRESULT`, return an error.
+///
+/// # Panic
+/// Will panic if the call succeeds but the resulting interface pointer is null. This can happen
+/// particularly with enumeration interfaces, which return `S_FALSE` (still success) when they
+/// write less than the requested number of results.
+pub fn get<I, F>(getter: F) -> Result<ComRef<I>, HResult>
 where
     I: Interface,
     F: FnOnce(*mut *mut I) -> HRESULT,
@@ -304,27 +306,26 @@ where
     // Throw away successful HRESULT.
     succeeded_or_err(getter(&mut interface as *mut *mut I))?;
 
-    if interface.is_null() {
-        Err(Error {
-            code: Some(NullPtr),
-            function: None,
-            file_line: None,
-        })
-    } else {
-        Ok(unsafe { ComPtr::from_raw(interface) })
-    }
+    Ok(unsafe { ComRef::from_raw(interface) })
 }
 
-/// Call a COM method, create a [`ComPtr`](com/struct.ComPtr.html) from an output parameter.
+/// Call a COM method, create a [`ComRef`](com/struct.ComRef.html) from an output parameter.
 ///
 /// An error is returned if the call fails or if the interface pointer is null. The error is
 /// augmented with the name of the interface and method, and the file name and line number of the
 /// macro usage.
 ///
+/// # Panic
+/// Will panic if the call succeeds but the resulting interface pointer is null. This can happen
+/// particularly with enumeration interfaces, which return `S_FALSE` (still success) when they
+/// write less than the requested number of results.
+///
 /// # Example
 ///
 /// ```ignore
-/// fn create_job(bcm: &ComPtr<IBackgroundCopyManager>) -> Result<ComPtr<IBackgroundCopyJob>> {
+/// fn create_job(bcm: &ComRef<IBackgroundCopyManager>)
+///     -> Result<ComRef<IBackgroundCopyJob>, HResult>
+/// {
 ///     unsafe {
 ///         com_call_getter!(
 ///             |job| bcm,
@@ -351,8 +352,11 @@ macro_rules! com_call_getter {
 
 /// Get a task memory pointer that is returned through an output parameter.
 ///
-/// If the call returns a failure `HRESULT`, or the pointer is null, return an error.
-pub fn get_cotaskmem<F, T>(getter: F) -> Result<CoTaskMem>
+/// If the call returns a failure `HRESULT`, return an error.
+///
+/// # Panic
+/// Will panic if the call succeeds but the resulting interface pointer is null.
+pub fn get_cotaskmem<F, T>(getter: F) -> Result<CoTaskMem, HResult>
 where
     F: FnOnce(*mut *mut T) -> HRESULT,
 {
@@ -361,15 +365,7 @@ where
     // Throw away successful HRESULT.
     succeeded_or_err(getter(&mut ptr))?;
 
-    if ptr.is_null() {
-        Err(Error {
-            code: Some(NullPtr),
-            function: None,
-            file_line: None,
-        })
-    } else {
-        Ok(unsafe { CoTaskMem::wrap(ptr as LPVOID).unwrap() })
-    }
+    Ok(unsafe { CoTaskMem::wrap(ptr as LPVOID).unwrap() })
 }
 
 /// Call a COM method, create a [`CoTaskMem`](handle/struct.CoTaskMem.html) from an output
@@ -378,11 +374,14 @@ where
 /// An error is returned if the call fails or if the pointer is null. The error is augmented with
 /// the name of the interface and method, and the file name and line number of the macro usage.
 ///
+/// # Panic
+/// Will panic if the call succeeds but the resulting interface pointer is null.
+///
 /// # Example
 ///
 /// ```ignore
-/// fn get_error_description(bcm: &ComPtr<IBackgroundCopyManager>, hr: HRESULT)
-///     -> Result<CoTaskMem>
+/// fn get_error_description(bcm: &ComRef<IBackgroundCopyManager>, hr: HRESULT)
+///     -> Result<CoTaskMem, HResult>
 /// {
 ///     unsafe {
 ///         com_call_taskmem_getter!(

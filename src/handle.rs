@@ -27,7 +27,7 @@ impl Handle {
     ///
     /// # Safety
     ///
-    /// `h` should be the only copy of the handle. `GetLastError` is called to
+    /// `h` should be the only copy of the handle. `GetLastError()` is called to
     /// return an error, so the last Windows API called should have been what produced
     /// the invalid handle.
     pub unsafe fn wrap_valid(h: HANDLE) -> Result<Handle, DWORD> {
@@ -43,7 +43,7 @@ impl Handle {
     ///
     /// # Safety
     ///
-    /// `h` should be the only copy of the handle. `GetLastError` is called to
+    /// `h` should be the only copy of the handle. `GetLastError()` is called to
     /// return an error, so the last Windows API called should have been what produced
     /// the invalid handle.
     pub unsafe fn wrap_nonnull(h: HANDLE) -> Result<Handle, DWORD> {
@@ -91,8 +91,8 @@ macro_rules! call_valid_handle_getter {
         {
             use $crate::error::{Error, ErrorCode, FileLine};
             $crate::handle::Handle::wrap_valid($f($($arg),*))
-                .map_err(|rc| Error {
-                    code: Some(ErrorCode::LastError(rc)),
+                .map_err(|last_error| Win32Error {
+                    code: last_error,
                     function: Some(stringify!($f)),
                     file_line: Some(FileLine(file!(), line!())),
                 })
@@ -130,8 +130,8 @@ macro_rules! call_nonnull_handle_getter {
         {
             use $crate::error::{Error, ErrorCode, FileLine};
             $crate::handle::Handle::wrap_nonnull($f($($arg),*))
-                .map_err(|rc| Error {
-                    code: Some(ErrorCode::LastError(rc)),
+                .map_err(|last_error| Win32Error {
+                    code: last_error,
                     function: Some(stringify!($f)),
                     file_line: Some(FileLine(file!(), line!())),
                 })
@@ -155,7 +155,7 @@ impl HLocal {
     ///
     /// # Safety
     ///
-    /// `h` should be the only copy of the handle. `GetLastError` is called to
+    /// `h` should be the only copy of the handle. `GetLastError()` is called to
     /// return an error, so the last Windows API called should have been what produced
     /// the invalid handle.
     pub unsafe fn wrap(h: HLOCAL) -> Result<HLocal, DWORD> {

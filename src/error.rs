@@ -7,110 +7,133 @@
 //! Wrap several flavors of Windows error into a `Result`.
 
 use std::fmt;
-use std::ptr::NonNull;
-use std::result;
 
 use failure::Fail;
 
 use winapi::shared::minwindef::DWORD;
-use winapi::shared::winerror::{HRESULT, SUCCEEDED};
+use winapi::shared::winerror::{FACILITY_WIN32, HRESULT, HRESULT_FROM_WIN32, SUCCEEDED};
 use winapi::um::errhandlingapi::GetLastError;
 
-/// An error with optional error code, function name, source file name and line number.
+/// A (Win32 error code)
+/// [https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d],
+/// usually from `GetLastError()`.
+///
+/// Includes optional function name, source file name, and line number.
 #[derive(Clone, Debug, Default, Eq, Fail, PartialEq)]
-pub struct Error {
-    /// The error code returned by the function.
-    pub code: Option<ErrorCode>,
+pub struct Win32Error {
+    /// The error code.
+    pub code: DWORD,
     /// The name of the function that failed.
     pub function: Option<&'static str>,
     /// The file and line of the failing function call.
     pub file_line: Option<FileLine>,
 }
 
-/// The error code associated with the error.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ErrorCode {
-    /// A null pointer where non-null was expected.
-    NullPtr,
-    /// A (usually non-zero) return code.
-    Rc(DWORD),
-    /// `GetLastError` after the error.
-    LastError(DWORD),
-    /// A (usually failing) `HRESULT`.
-    HResult(HRESULT),
+/// An (HRESULT error code)
+/// [https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a].
+/// These usually come from COM APIs.
+///
+/// Includes optional function name, source file name, and line number.
+#[derive(Clone, Debug, Default, Eq, Fail, PartialEq)]
+pub struct HResult {
+    /// The error code
+    pub hr: HRESULT,
+    /// The name of the function that failed.
+    pub function: Option<&'static str>,
+    /// The file and line of the failing function call.
+    pub file_line: Option<FileLine>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileLine(pub &'static str, pub u32);
 
-use self::ErrorCode::*;
+impl Win32Error {
+    /// Create from an error code.
+    pub fn new(code: DWORD) -> Self {
+        Win32Error {
+            code,
+            function: None,
+            file_line: None,
+        }
+    }
 
-impl Error {
+    /// Create from `GetLastError()`
+    pub fn get_last_error() -> Self {
+        Win32Error::new(unsafe { GetLastError() })
+    }
+
     /// Add the name of the failing function to the error.
-    pub fn function(self, function: &'static str) -> Error {
-        Error {
+    pub fn function(self, function: &'static str) -> Self {
+        Self {
             function: Some(function),
             ..self
         }
     }
 
     /// Add the source file name and line number of the call to the error.
-    pub fn file_line(self, file: &'static str, line: u32) -> Error {
-        Error {
+    pub fn file_line(self, file: &'static str, line: u32) -> Self {
+        Self {
+            file_line: Some(FileLine(file, line)),
+            ..self
+        }
+    }
+}
+
+impl HResult {
+    /// Create from an `HRESULT`.
+    pub fn new(hr: HRESULT) -> Self {
+        HResult {
+            hr,
+            function: None,
+            file_line: None,
+        }
+    }
+    /// Add the name of the failing function to the error.
+    pub fn function(self, function: &'static str) -> Self {
+        Self {
+            function: Some(function),
+            ..self
+        }
+    }
+
+    /// Add the source file name and line number of the call to the error.
+    pub fn file_line(self, file: &'static str, line: u32) -> Self {
+        Self {
             file_line: Some(FileLine(file, line)),
             ..self
         }
     }
 
-    /// Was the error a null pointer?
-    pub fn is_nullptr(&self) -> bool {
-        if let Some(NullPtr) = self.code {
-            true
-        } else {
-            false
-        }
+    /// Get the result code portion of the `HRESULT`
+    pub fn extract_code(&self) -> HRESULT {
+        // from winerror.h HRESULT_CODE macro
+        self.hr & 0xFFFF
     }
 
-    /// The return code of the error, if there is one.
-    pub fn get_rc(&self) -> Option<DWORD> {
-        if let Some(Rc(rc)) = self.code {
-            Some(rc)
-        } else {
-            None
-        }
+    /// Get the facility portion of the `HRESULT`
+    pub fn extract_facility(&self) -> HRESULT {
+        // from winerror.h HRESULT_FACILITY macro
+        (self.hr >> 16) & 0x1fff
     }
 
-    /// The value of `GetLastError` from the error, if known.
-    pub fn get_last_error(&self) -> Option<DWORD> {
-        if let Some(LastError(last_err)) = self.code {
-            Some(last_err)
+    /// If the `HResult` corresponds to a Win32 error, convert.
+    ///
+    /// Returns the original `HResult` as an error on failure.
+    pub fn try_into_win32_err(self) -> Result<Win32Error, Self> {
+        if self.extract_facility() == FACILITY_WIN32 {
+            Ok(Win32Error {
+                code: self.extract_code() as DWORD,
+                function: self.function,
+                file_line: self.file_line,
+            })
         } else {
-            None
-        }
-    }
-
-    /// The `HRESULT` from the error, if there is one.
-    pub fn get_hresult(&self) -> Option<HRESULT> {
-        if let Some(HResult(hr)) = self.code {
-            Some(hr)
-        } else {
-            None
+            Err(self)
         }
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
-        if self.function.is_none() && self.code.is_none() {
-            if let Some(FileLine(file, line)) = self.file_line {
-                write!(f, "Failure at {}:{}", file, line)?;
-            } else {
-                write!(f, "Error")?;
-            }
-
-            return Ok(());
-        }
-
+impl fmt::Display for Win32Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         if let Some(function) = self.function {
             if let Some(FileLine(file, line)) = self.file_line {
                 write!(f, "{}:{} ", file, line)?;
@@ -118,164 +141,136 @@ impl fmt::Display for Error {
 
             write!(f, "{} ", function)?;
 
-            write!(f, "failed.")?;
+            write!(f, "failed, ")?;
         }
 
-        if self.function.is_some() && self.code.is_some() {
-            write!(f, " ")?;
-        }
-
-        if let Some(ref ec) = self.code {
-            match ec {
-                NullPtr => write!(f, "null pointer")?,
-                Rc(rc) => write!(f, "rc = {:#010x}", rc)?,
-                LastError(rc) => write!(f, "GetLastError = {:#010x}", rc)?,
-                HResult(hr) => write!(f, "hr = {:#010x}", hr)?,
-            };
-        }
+        write!(f, "{:#010x}", self.code)?;
 
         Ok(())
     }
 }
 
-pub type Result<T> = result::Result<T, Error>;
+impl fmt::Display for HResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        if let Some(function) = self.function {
+            if let Some(FileLine(file, line)) = self.file_line {
+                write!(f, "{}:{} ", file, line)?;
+            }
+
+            write!(f, "{} ", function)?;
+
+            if !SUCCEEDED(self.hr) {
+                write!(f, "failed. ")?;
+            } else {
+                write!(f, "returned ")?;
+            }
+        }
+
+        write!(f, "HRESULT {:#010x}", self.hr)?;
+
+        Ok(())
+    }
+}
 
 /// Trait for adding information to a `Result<T, Error>`.
-pub trait ResultExt<T> {
+pub trait ResultExt<T, E> {
+    type Code;
+
     /// Add the name of the failing function to the error.
-    fn function(self, function: &'static str) -> Result<T>;
+    fn function(self, function: &'static str) -> Result<T, E>;
 
     /// Add the source file name and line number of the call to the error.
-    fn file_line(self, file: &'static str, line: u32) -> Result<T>;
+    fn file_line(self, file: &'static str, line: u32) -> Result<T, E>;
 
-    /// Replace `Err(code)` with `Ok(replacement)`.
-    fn allow_err(self, code: ErrorCode, replacement: T) -> Result<T>;
-
-    /// Replace `Err(NullPtr)` with `Ok(replacement)`.
-    fn allow_nullptr(self, replacement: T) -> Result<T>;
-
-    /// Replace `Err(Rc(rc))` with `Ok(replacement)`.
-    fn allow_rc(self, rc: DWORD, replacement: T) -> Result<T>;
-
-    /// Replace `Err(LastError(last_err))` with `Ok(replacement)`.
-    fn allow_last_error(self, last_err: DWORD, replacement: T) -> Result<T>;
-
-    /// Replace `Err(HResult(hr))` with `Ok(replacement)`.
-    fn allow_hresult(self, hr: HRESULT, replacement: T) -> Result<T>;
+    /// Replace `Err(code)` with `replacement`.
+    fn allow_err(self, code: Self::Code, replacement: T) -> Result<T, E>;
 
     /// Replace `Err(code)` with the result of calling `replacement()`.
-    fn allow_err_with<F>(self, code: ErrorCode, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T;
-
-    /// Replace `Err(NullPtr)` with the result of calling `replacement()`.
-    fn allow_nullptr_with<F>(self, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T;
-
-    /// Replace `Err(Rc(rc))` with the result of calling `replacement()`.
-    fn allow_rc_with<F>(self, rc: DWORD, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T;
-
-    /// Replace `Err(LastError(last_err))` with the result of calling `replacement()`.
-    fn allow_last_error_with<F>(self, last_err: DWORD, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T;
-
-    /// Replace `Err(HResult(hr))` with the result of calling `replacement()`.
-    fn allow_hresult_with<F>(self, hr: HRESULT, replacement: F) -> Result<T>
+    fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Result<T, E>
     where
         F: FnOnce() -> T;
 }
 
-impl<T> ResultExt<T> for Result<T> {
-    fn function(self, function: &'static str) -> Result<T> {
+impl<T> ResultExt<T, HResult> for Result<T, HResult> {
+    type Code = HRESULT;
+    fn function(self, function: &'static str) -> Self {
         self.map_err(|e| e.function(function))
     }
 
-    fn file_line(self, file: &'static str, line: u32) -> Result<T> {
+    fn file_line(self, file: &'static str, line: u32) -> Self {
         self.map_err(|e| e.file_line(file, line))
     }
 
-    fn allow_err(self, code: ErrorCode, replacement: T) -> Result<T> {
+    fn allow_err(self, code: Self::Code, replacement: T) -> Self {
         match self {
             Ok(r) => Ok(r),
-            Err(ref e) if e.code == Some(code) => Ok(replacement),
+            Err(ref e) if e.hr == code => Ok(replacement),
             Err(e) => Err(e),
         }
     }
 
-    fn allow_nullptr(self, replacement: T) -> Result<T> {
-        self.allow_err(NullPtr, replacement)
-    }
-
-    fn allow_rc(self, rc: DWORD, replacement: T) -> Result<T> {
-        self.allow_err(Rc(rc), replacement)
-    }
-
-    fn allow_last_error(self, last_err: DWORD, replacement: T) -> Result<T> {
-        self.allow_err(LastError(last_err), replacement)
-    }
-
-    fn allow_hresult(self, hr: HRESULT, replacement: T) -> Result<T> {
-        self.allow_err(HResult(hr), replacement)
-    }
-
-    fn allow_err_with<F>(self, code: ErrorCode, replacement: F) -> Result<T>
+    fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Self
     where
         F: FnOnce() -> T,
     {
         match self {
             Ok(r) => Ok(r),
-            Err(ref e) if e.code == Some(code) => Ok(replacement()),
+            Err(ref e) if e.hr == code => Ok(replacement()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<T> ResultExt<T, Win32Error> for Result<T, Win32Error> {
+    type Code = DWORD;
+    fn function(self, function: &'static str) -> Self {
+        self.map_err(|e| e.function(function))
+    }
+
+    fn file_line(self, file: &'static str, line: u32) -> Self {
+        self.map_err(|e| e.file_line(file, line))
+    }
+
+    fn allow_err(self, code: Self::Code, replacement: T) -> Self {
+        match self {
+            Ok(r) => Ok(r),
+            Err(ref e) if e.code == code => Ok(replacement),
             Err(e) => Err(e),
         }
     }
 
-    fn allow_nullptr_with<F>(self, replacement: F) -> Result<T>
+    fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Self
     where
         F: FnOnce() -> T,
     {
-        self.allow_err_with(NullPtr, replacement)
+        match self {
+            Ok(r) => Ok(r),
+            Err(ref e) if e.code == code => Ok(replacement()),
+            Err(e) => Err(e),
+        }
     }
+}
 
-    fn allow_rc_with<F>(self, rc: DWORD, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T,
-    {
-        self.allow_err_with(Rc(rc), replacement)
-    }
-
-    fn allow_last_error_with<F>(self, last_err: DWORD, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T,
-    {
-        self.allow_err_with(LastError(last_err), replacement)
-    }
-
-    fn allow_hresult_with<F>(self, hr: HRESULT, replacement: F) -> Result<T>
-    where
-        F: FnOnce() -> T,
-    {
-        self.allow_err_with(HResult(hr), replacement)
+impl From<Win32Error> for HResult {
+    fn from(win32_error: Win32Error) -> Self {
+        HResult {
+            hr: HRESULT_FROM_WIN32(win32_error.code),
+            function: win32_error.function,
+            file_line: win32_error.file_line,
+        }
     }
 }
 
 /// Convert an `HRESULT` into a `Result`.
-pub fn succeeded_or_err(hr: HRESULT) -> Result<HRESULT> {
+pub fn succeeded_or_err(hr: HRESULT) -> Result<HRESULT, HResult> {
     if !SUCCEEDED(hr) {
-        Err(Error {
-            code: Some(HResult(hr)),
-            function: None,
-            file_line: None,
-        })
+        Err(HResult::new(hr))
     } else {
         Ok(hr)
     }
 }
 
-/// Call a function that returns an `HRESULT`, convert to a `Result<HRESULT>`.
+/// Call a function that returns an `HRESULT`, convert to a `Result`.
 ///
 /// The error will be augmented with the name of the function and the file and line number of
 /// the macro usage.
@@ -306,17 +301,13 @@ macro_rules! check_succeeded {
 }
 
 /// Convert an integer return value into a `Result`, using `GetLastError()` if zero.
-pub fn true_or_last_err<T>(rv: T) -> Result<T>
+pub fn true_or_last_err<T>(rv: T) -> Result<T, Win32Error>
 where
     T: Eq,
     T: From<bool>,
 {
     if rv == T::from(false) {
-        Err(Error {
-            code: Some(LastError(unsafe { GetLastError() })),
-            function: None,
-            file_line: None,
-        })
+        Err(Win32Error::get_last_error())
     } else {
         Ok(rv)
     }
@@ -350,16 +341,4 @@ macro_rules! check_true {
     ($f:ident ( $($arg:expr),+ , )) => {
         $crate::check_true!($f($($arg),+))
     };
-}
-
-/// Convert a pointer `rv` into a `Result<NonNull>`, using `GetLastError()` if null.
-pub fn nonnull_or_last_err<T>(p: *mut T) -> Result<NonNull<T>> {
-    match NonNull::new(p) {
-        None => Err(Error {
-            code: Some(LastError(unsafe { GetLastError() })),
-            function: None,
-            file_line: None,
-        }),
-        Some(p) => Ok(p),
-    }
 }
