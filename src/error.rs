@@ -14,6 +14,7 @@ use winapi::shared::minwindef::DWORD;
 use winapi::shared::winerror::{FACILITY_WIN32, HRESULT, HRESULT_FROM_WIN32, SUCCEEDED};
 use winapi::um::errhandlingapi::GetLastError;
 
+/// An error code, optionally with information about the failing call.
 #[derive(Clone, Debug, Eq, Fail, PartialEq)]
 pub struct ErrorAndSource<T: ErrorCode> {
     code: T,
@@ -21,8 +22,11 @@ pub struct ErrorAndSource<T: ErrorCode> {
     file_line: Option<FileLine>,
 }
 
-pub trait ErrorCode: fmt::Debug + Eq + PartialEq + fmt::Display + Send + Sync + 'static {
-    type InnerT: Eq + PartialEq;
+/// A transparent wrapper for an error code.
+pub trait ErrorCode:
+    Copy + fmt::Debug + Eq + PartialEq + fmt::Display + Send + Sync + 'static
+{
+    type InnerT: Copy + Eq + PartialEq;
 
     fn get(&self) -> Self::InnerT;
 }
@@ -44,12 +48,22 @@ where
         }
     }
 
+    /// Get the name of the failing function, if known.
+    pub fn get_function(&self) -> Option<&'static str> {
+        self.function
+    }
+
     /// Add the source file name and line number of the call to the error.
     pub fn file_line(self, file: &'static str, line: u32) -> Self {
         Self {
             file_line: Some(FileLine(file, line)),
             ..self
         }
+    }
+
+    /// Get the source file name and line number of the failing call.
+    pub fn get_file_line(&self) -> &Option<FileLine> {
+        &self.file_line
     }
 }
 
@@ -59,8 +73,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         if let Some(function) = self.function {
-            if let Some(FileLine(file, line)) = self.file_line {
-                write!(f, "{}:{} ", file, line)?;
+            if let Some(ref file_line) = self.file_line {
+                write!(f, "{} ", file_line)?;
             }
 
             write!(f, "{} ", function)?;
@@ -75,12 +89,19 @@ where
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct FileLine(pub &'static str, pub u32);
+pub struct FileLine(pub &'static str, pub u32);
+
+impl fmt::Display for FileLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}:{}", self.0, self.1)
+    }
+}
 
 /// A [Win32 error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d),
 /// usually from `GetLastError()`.
 ///
-/// Includes optional function name, source file name, and line number.
+/// Includes optional function name, source file name, and line number. See
+/// [`ErrorAndSource`](struct.ErrorAndSource.html) for additional methods.
 pub type Win32Error = ErrorAndSource<Win32ErrorInner>;
 
 impl Win32Error {
@@ -99,7 +120,7 @@ impl Win32Error {
     }
 }
 
-#[doc(hide)]
+#[doc(hidden)]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Win32ErrorInner(DWORD);
@@ -121,7 +142,8 @@ impl fmt::Display for Win32ErrorInner {
 /// An [HRESULT error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a).
 /// These usually come from COM APIs.
 ///
-/// Includes optional function name, source file name, and line number.
+/// Includes optional function name, source file name, and line number. See
+/// [`ErrorAndSource`](struct.ErrorAndSource.html) for additional methods.
 pub type HResult = ErrorAndSource<HResultInner>;
 
 impl HResult {
@@ -162,7 +184,7 @@ impl HResult {
     }
 }
 
-#[doc(hide)]
+#[doc(hidden)]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HResultInner(HRESULT);

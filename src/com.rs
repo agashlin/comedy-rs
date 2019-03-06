@@ -62,7 +62,6 @@ where
         mem::forget(self);
         p
     }
-    #[doc(hide)]
     fn as_unknown(&self) -> &IUnknown {
         unsafe { &*(self.as_raw() as *mut IUnknown) }
     }
