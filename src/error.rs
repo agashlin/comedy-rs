@@ -14,42 +14,80 @@ use winapi::shared::minwindef::DWORD;
 use winapi::shared::winerror::{FACILITY_WIN32, HRESULT, HRESULT_FROM_WIN32, SUCCEEDED};
 use winapi::um::errhandlingapi::GetLastError;
 
+#[derive(Clone, Debug, Eq, Fail, PartialEq)]
+pub struct ErrorAndSource<T: ErrorCode> {
+    code: T,
+    function: Option<&'static str>,
+    file_line: Option<FileLine>,
+}
+
+pub trait ErrorCode: fmt::Debug + Eq + PartialEq + fmt::Display + Send + Sync + 'static {
+    type InnerT: Eq + PartialEq;
+
+    fn get(&self) -> Self::InnerT;
+}
+
+impl<T> ErrorAndSource<T>
+where
+    T: ErrorCode,
+{
+    /// Get the underlying error code.
+    pub fn code(&self) -> T::InnerT {
+        self.code.get()
+    }
+
+    /// Add the name of the failing function to the error.
+    pub fn function(self, function: &'static str) -> Self {
+        Self {
+            function: Some(function),
+            ..self
+        }
+    }
+
+    /// Add the source file name and line number of the call to the error.
+    pub fn file_line(self, file: &'static str, line: u32) -> Self {
+        Self {
+            file_line: Some(FileLine(file, line)),
+            ..self
+        }
+    }
+}
+
+impl<T> fmt::Display for ErrorAndSource<T>
+where
+    T: ErrorCode,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        if let Some(function) = self.function {
+            if let Some(FileLine(file, line)) = self.file_line {
+                write!(f, "{}:{} ", file, line)?;
+            }
+
+            write!(f, "{} ", function)?;
+
+            write!(f, "error: ")?;
+        }
+
+        write!(f, "{}", self.code)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FileLine(pub &'static str, pub u32);
+
 /// A [Win32 error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d),
 /// usually from `GetLastError()`.
 ///
 /// Includes optional function name, source file name, and line number.
-#[derive(Clone, Debug, Default, Eq, Fail, PartialEq)]
-pub struct Win32Error {
-    /// The error code.
-    pub code: DWORD,
-    /// The name of the function that failed.
-    pub function: Option<&'static str>,
-    /// The file and line of the failing function call.
-    pub file_line: Option<FileLine>,
-}
-
-/// An [HRESULT error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a).
-/// These usually come from COM APIs.
-///
-/// Includes optional function name, source file name, and line number.
-#[derive(Clone, Debug, Default, Eq, Fail, PartialEq)]
-pub struct HResult {
-    /// The error code
-    pub hr: HRESULT,
-    /// The name of the function that failed.
-    pub function: Option<&'static str>,
-    /// The file and line of the failing function call.
-    pub file_line: Option<FileLine>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileLine(pub &'static str, pub u32);
+pub type Win32Error = ErrorAndSource<Win32ErrorInner>;
 
 impl Win32Error {
     /// Create from an error code.
     pub fn new(code: DWORD) -> Self {
         Win32Error {
-            code,
+            code: Win32ErrorInner(code),
             function: None,
             file_line: None,
         }
@@ -59,59 +97,53 @@ impl Win32Error {
     pub fn get_last_error() -> Self {
         Win32Error::new(unsafe { GetLastError() })
     }
+}
 
-    /// Add the name of the failing function to the error.
-    pub fn function(self, function: &'static str) -> Self {
-        Self {
-            function: Some(function),
-            ..self
-        }
-    }
+#[doc(hide)]
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Win32ErrorInner(DWORD);
 
-    /// Add the source file name and line number of the call to the error.
-    pub fn file_line(self, file: &'static str, line: u32) -> Self {
-        Self {
-            file_line: Some(FileLine(file, line)),
-            ..self
-        }
+impl ErrorCode for Win32ErrorInner {
+    type InnerT = DWORD;
+
+    fn get(&self) -> DWORD {
+        self.0
     }
 }
+
+impl fmt::Display for Win32ErrorInner {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{:#010x}", self.0)
+    }
+}
+
+/// An [HRESULT error code](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a).
+/// These usually come from COM APIs.
+///
+/// Includes optional function name, source file name, and line number.
+pub type HResult = ErrorAndSource<HResultInner>;
 
 impl HResult {
     /// Create from an `HRESULT`.
     pub fn new(hr: HRESULT) -> Self {
         HResult {
-            hr,
+            code: HResultInner(hr),
             function: None,
             file_line: None,
-        }
-    }
-    /// Add the name of the failing function to the error.
-    pub fn function(self, function: &'static str) -> Self {
-        Self {
-            function: Some(function),
-            ..self
-        }
-    }
-
-    /// Add the source file name and line number of the call to the error.
-    pub fn file_line(self, file: &'static str, line: u32) -> Self {
-        Self {
-            file_line: Some(FileLine(file, line)),
-            ..self
         }
     }
 
     /// Get the result code portion of the `HRESULT`
     pub fn extract_code(&self) -> HRESULT {
         // from winerror.h HRESULT_CODE macro
-        self.hr & 0xFFFF
+        self.code.0 & 0xFFFF
     }
 
     /// Get the facility portion of the `HRESULT`
     pub fn extract_facility(&self) -> HRESULT {
         // from winerror.h HRESULT_FACILITY macro
-        (self.hr >> 16) & 0x1fff
+        (self.code.0 >> 16) & 0x1fff
     }
 
     /// If the `HResult` corresponds to a Win32 error, convert.
@@ -120,7 +152,7 @@ impl HResult {
     pub fn try_into_win32_err(self) -> Result<Win32Error, Self> {
         if self.extract_facility() == FACILITY_WIN32 {
             Ok(Win32Error {
-                code: self.extract_code() as DWORD,
+                code: Win32ErrorInner(self.extract_code() as DWORD),
                 function: self.function,
                 file_line: self.file_line,
             })
@@ -130,67 +162,50 @@ impl HResult {
     }
 }
 
-impl fmt::Display for Win32Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        if let Some(function) = self.function {
-            if let Some(FileLine(file, line)) = self.file_line {
-                write!(f, "{}:{} ", file, line)?;
-            }
+#[doc(hide)]
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HResultInner(HRESULT);
 
-            write!(f, "{} ", function)?;
+impl ErrorCode for HResultInner {
+    type InnerT = HRESULT;
 
-            write!(f, "failed, ")?;
-        }
-
-        write!(f, "{:#010x}", self.code)?;
-
-        Ok(())
+    fn get(&self) -> HRESULT {
+        self.0
     }
 }
 
-impl fmt::Display for HResult {
+impl fmt::Display for HResultInner {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        if let Some(function) = self.function {
-            if let Some(FileLine(file, line)) = self.file_line {
-                write!(f, "{}:{} ", file, line)?;
-            }
-
-            write!(f, "{} ", function)?;
-
-            if !SUCCEEDED(self.hr) {
-                write!(f, "failed. ")?;
-            } else {
-                write!(f, "returned ")?;
-            }
-        }
-
-        write!(f, "HRESULT {:#010x}", self.hr)?;
-
-        Ok(())
+        write!(f, "HRESULT {:#010x}", self.0)
     }
 }
 
-/// Trait for adding information to a `Result<T, Error>`.
+/// Extra functions to work with a `Result<T, ErrorAndSource>`.
 pub trait ResultExt<T, E> {
     type Code;
 
     /// Add the name of the failing function to the error.
-    fn function(self, function: &'static str) -> Result<T, E>;
+    fn function(self, function: &'static str) -> Self;
 
     /// Add the source file name and line number of the call to the error.
-    fn file_line(self, file: &'static str, line: u32) -> Result<T, E>;
+    fn file_line(self, file: &'static str, line: u32) -> Self;
 
     /// Replace `Err(code)` with `replacement`.
-    fn allow_err(self, code: Self::Code, replacement: T) -> Result<T, E>;
+    fn allow_err(self, code: Self::Code, replacement: T) -> Self;
 
     /// Replace `Err(code)` with the result of calling `replacement()`.
-    fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Result<T, E>
+    fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Self
     where
         F: FnOnce() -> T;
 }
 
-impl<T> ResultExt<T, HResult> for Result<T, HResult> {
-    type Code = HRESULT;
+impl<T, EC> ResultExt<T, ErrorAndSource<EC>> for Result<T, ErrorAndSource<EC>>
+where
+    EC: ErrorCode,
+{
+    type Code = EC::InnerT;
+
     fn function(self, function: &'static str) -> Self {
         self.map_err(|e| e.function(function))
     }
@@ -200,59 +215,33 @@ impl<T> ResultExt<T, HResult> for Result<T, HResult> {
     }
 
     fn allow_err(self, code: Self::Code, replacement: T) -> Self {
-        match self {
-            Ok(r) => Ok(r),
-            Err(ref e) if e.hr == code => Ok(replacement),
-            Err(e) => Err(e),
-        }
+        self.or_else(|e| {
+            if e.code() == code {
+                Ok(replacement)
+            } else {
+                Err(e)
+            }
+        })
     }
 
     fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Self
     where
         F: FnOnce() -> T,
     {
-        match self {
-            Ok(r) => Ok(r),
-            Err(ref e) if e.hr == code => Ok(replacement()),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-impl<T> ResultExt<T, Win32Error> for Result<T, Win32Error> {
-    type Code = DWORD;
-    fn function(self, function: &'static str) -> Self {
-        self.map_err(|e| e.function(function))
-    }
-
-    fn file_line(self, file: &'static str, line: u32) -> Self {
-        self.map_err(|e| e.file_line(file, line))
-    }
-
-    fn allow_err(self, code: Self::Code, replacement: T) -> Self {
-        match self {
-            Ok(r) => Ok(r),
-            Err(ref e) if e.code == code => Ok(replacement),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Self
-    where
-        F: FnOnce() -> T,
-    {
-        match self {
-            Ok(r) => Ok(r),
-            Err(ref e) if e.code == code => Ok(replacement()),
-            Err(e) => Err(e),
-        }
+        self.or_else(|e| {
+            if e.code() == code {
+                Ok(replacement())
+            } else {
+                Err(e)
+            }
+        })
     }
 }
 
 impl From<Win32Error> for HResult {
     fn from(win32_error: Win32Error) -> Self {
         HResult {
-            hr: HRESULT_FROM_WIN32(win32_error.code),
+            code: HResultInner(HRESULT_FROM_WIN32(win32_error.code())),
             function: win32_error.function,
             file_line: win32_error.file_line,
         }
