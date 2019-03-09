@@ -89,7 +89,7 @@ impl Drop for Handle {
 macro_rules! call_valid_handle_getter {
     ($f:ident ( $($arg:expr),* )) => {
         {
-            use $crate::error::{Error, ErrorCode, FileLine};
+            use $crate::error::{Error, ErrorCode, FileLine, ResultExt};
             $crate::handle::Handle::wrap_valid($f($($arg),*))
                 .map_err(|last_error| Win32Error {
                     code: last_error,
@@ -128,7 +128,7 @@ macro_rules! call_valid_handle_getter {
 macro_rules! call_nonnull_handle_getter {
     ($f:ident ( $($arg:expr),* )) => {
         {
-            use $crate::error::{Error, ErrorCode, FileLine};
+            use $crate::error::{Error, ErrorCode, FileLine, ResultExt};
             $crate::handle::Handle::wrap_nonnull($f($($arg),*))
                 .map_err(|last_error| Win32Error {
                     code: last_error,

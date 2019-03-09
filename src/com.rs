@@ -273,18 +273,19 @@ where
 /// ```
 #[macro_export]
 macro_rules! com_call {
-    ($obj:expr, $interface:ident :: $method:ident ( $($arg:expr),* )) => {
+    ($obj:expr, $interface:ident :: $method:ident ( $($arg:expr),* )) => {{
+        use $crate::error::ResultExt;
         $crate::error::succeeded_or_err({
             let obj: &$interface = &*$obj;
             obj.$method($($arg),*)
         }).function(concat!(stringify!($interface), "::", stringify!($method)))
           .file_line(file!(), line!())
-    };
+    }};
 
     // support for trailing comma in method argument list
-    ($obj:expr, $interface:ident :: $method:ident ( $($arg:expr),+ , )) => {
+    ($obj:expr, $interface:ident :: $method:ident ( $($arg:expr),+ , )) => {{
         $crate::com_call!($obj, $interface::$method($($arg),+))
-    };
+    }};
 }
 
 /// Get an interface pointer that is returned through an output parameter.
@@ -341,6 +342,7 @@ where
 #[macro_export]
 macro_rules! com_call_getter {
     (| $outparam:ident | $obj:expr, $interface:ident :: $method:ident ( $($arg:expr),* )) => {{
+        use $crate::error::ResultExt;
         let obj: &$interface = &*$obj;
         $crate::com::get(|$outparam| {
             obj.$method($($arg),*)
@@ -403,6 +405,7 @@ where
 #[macro_export]
 macro_rules! com_call_taskmem_getter {
     (| $outparam:ident | $obj:expr, $interface:ident :: $method:ident ( $($arg:expr),* )) => {{
+        use $crate::error::ResultExt;
         $crate::com::get_cotaskmem(|$outparam| {
             $obj.$method($($arg),*)
         }).function(concat!(stringify!($interface), "::", stringify!($method)))
