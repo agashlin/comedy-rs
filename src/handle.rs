@@ -51,7 +51,9 @@ impl Handle {
     }
 
     /// Obtains the raw `HANDLE` without transferring ownership.
+    ///
     /// Do __not__ close this handle because it is still owned by the `Handle`.
+    ///
     /// Do __not__ use this handle beyond the lifetime of the `Handle`.
     pub fn as_raw(&self) -> HANDLE {
         self.0

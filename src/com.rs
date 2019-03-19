@@ -84,14 +84,18 @@ where
     }
 
     /// Obtains the raw pointer without transferring ownership.
+    ///
     /// Do __not__ release this pointer because it is still owned by the `ComRef`.
+    ///
     /// Do __not__ use this pointer beyond the lifetime of the `ComRef`.
     pub fn as_raw(&self) -> NonNull<T> {
         self.0
     }
 
     /// Obtains the raw pointer without transferring ownership.
+    ///
     /// Do __not__ release this pointer because it is still owned by the `ComRef`.
+    ///
     /// Do __not__ use this pointer beyond the lifetime of the `ComRef`.
     pub fn as_raw_ptr(&self) -> *mut T {
         self.0.as_ptr()
@@ -449,10 +453,21 @@ impl<T> CoTaskMem<T> {
     }
 
     /// Obtains the raw pointer without transferring ownership.
+    ///
     /// Do __not__ free this pointer because it is still owned by the `CoTaskMem`.
+    ///
     /// Do __not__ use this pointer beyond the lifetime of the `CoTaskMem`.
     pub fn as_raw(&self) -> NonNull<T> {
         self.0
+    }
+
+    /// Obtains the raw pointer without transferring ownership.
+    ///
+    /// Do __not__ free this pointer because it is still owned by the `CoTaskMem`.
+    ///
+    /// Do __not__ use this pointer beyond the lifetime of the `CoTaskMem`.
+    pub fn as_raw_ptr(&self) -> *mut T {
+        self.0.as_ptr()
     }
 }
 
