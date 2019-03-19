@@ -1,6 +1,6 @@
 [package]
 name = "comedy"
-version = "0.1.0-alpha3"
+version = "0.1.0-alpha4"
 authors = ["Adam Gashlin <agashlin@mozilla.com>"]
 description = "Windows error handling, COM, and handles"
 keywords = ["windows", "com", "win32"]
@@ -33,4 +33,12 @@ features = ["basetsd",
             "winerror",
             "wtypes",
             "wtypesbase",
+            ]
+
+[dev-dependencies.winapi]
+version = "0.3.6"
+features = ["bits",
+            "fileapi",
+            "guiddef",
+            "synchapi",
             ]

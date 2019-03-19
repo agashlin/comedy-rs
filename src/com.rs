@@ -215,8 +215,8 @@ thread_local! {
 /// The CLSID of the class and the IID of the interface come from the winapi `RIDL` macro, which
 /// defines `Class` and `Interface` implementations.
 ///
-/// (`create_instance_local_server`)[fn.create_instance_local_server.html] and
-/// (`create_instance_inproc_server`)[fn.create_instance_inproc_server.html] are convenience
+/// [`create_instance_local_server`](fn.create_instance_local_server.html) and
+/// [`create_instance_inproc_server`](fn.create_instance_inproc_server.html) are convenience
 /// functions for typical contexts.
 pub fn create_instance<C, I>(ctx: CLSCTX) -> Result<ComRef<I>, HResult>
 where
@@ -263,11 +263,19 @@ where
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # extern crate winapi;
+/// #
+/// # use winapi::um::bits::IBackgroundCopyJob;
+/// #
+/// # use comedy::com::ComRef;
+/// # use comedy::{com_call, HResult};
+/// #
 /// fn cancel_job(job: &ComRef<IBackgroundCopyJob>) -> Result<(), HResult> {
 ///     unsafe {
-///         com_call!(job, IBackgroundCopyJob::Cancel())
+///         com_call!(job, IBackgroundCopyJob::Cancel())?;
 ///     }
+///     Ok(())
 /// }
 /// ```
 #[macro_export]
@@ -324,14 +332,20 @@ where
 ///
 /// # Example
 ///
-/// ```ignore
-/// fn create_job(bcm: &ComRef<IBackgroundCopyManager>)
+/// ```no_run
+/// # extern crate winapi;
+/// # use winapi::shared::guiddef::GUID;
+/// # use winapi::um::bits::{IBackgroundCopyManager, IBackgroundCopyJob};
+/// # use comedy::com::ComRef;
+/// # use comedy::{com_call_getter, HResult};
+///
+/// fn create_job(bcm: &ComRef<IBackgroundCopyManager>, id: &GUID)
 ///     -> Result<ComRef<IBackgroundCopyJob>, HResult>
 /// {
 ///     unsafe {
 ///         com_call_getter!(
 ///             |job| bcm,
-///             IBackgroundCopyManager::CreateJob(x, y, z, job)
+///             IBackgroundCopyManager::GetJob(id, job)
 ///         )
 ///     }
 /// }
@@ -385,14 +399,20 @@ where
 ///
 /// # Example
 ///
-/// ```ignore
-/// fn get_error_description(bcm: &ComRef<IBackgroundCopyManager>, hr: HRESULT)
-///     -> Result<CoTaskMem, HResult>
+/// ```no_run
+/// # extern crate winapi;
+/// # use winapi::shared::winerror::HRESULT;
+/// # use winapi::um::bits::IBackgroundCopyManager;
+/// # use comedy::com::{ComRef, CoTaskMem};
+/// # use comedy::{com_call_taskmem_getter, HResult};
+/// #
+/// fn get_error_description(bcm: &ComRef<IBackgroundCopyManager>, lang_id: u32, hr: HRESULT)
+///     -> Result<CoTaskMem<u16>, HResult>
 /// {
 ///     unsafe {
 ///         com_call_taskmem_getter!(
 ///             |desc| bcm,
-///             IBackgroundCopyManager::GetErrorDescription(hr, language_id, desc)
+///             IBackgroundCopyManager::GetErrorDescription(hr, lang_id, desc)
 ///         )
 ///     }
 /// }

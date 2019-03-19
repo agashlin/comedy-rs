@@ -74,24 +74,27 @@ impl Drop for Handle {
 ///
 /// # Example
 ///
-/// ```ignore
-/// unsafe {
-///     let handle = call_valid_handle_getter!(
-///         FindFirstFileA(std::ptr::null_mut(), std::ptr::null_mut())
-///     )?;
+/// ```no_run
+/// # extern crate winapi;
+/// # use std::ptr;
+/// # use winapi::um::fileapi::FindFirstFileW;
+/// # use winapi::um::minwinbase::WIN32_FIND_DATAW;
+/// # use comedy::handle::Handle;
+/// # use comedy::{call_valid_handle_getter, Win32Error};
+/// #
+/// unsafe fn find_first(name: &[u16], data: &mut WIN32_FIND_DATAW) -> Result<Handle, Win32Error> {
+///     call_valid_handle_getter!(FindFirstFileW(name.as_ptr(), data))
 /// }
 /// ```
 #[macro_export]
 macro_rules! call_valid_handle_getter {
     ($f:ident ( $($arg:expr),* )) => {
         {
-            use $crate::error::{Error, ErrorCode, FileLine, ResultExt};
+            use $crate::error::{ErrorCode, FileLine, ResultExt, Win32Error};
             $crate::handle::Handle::from_valid($f($($arg),*))
-                .map_err(|last_error| Win32Error {
-                    code: last_error,
-                    function: Some(stringify!($f)),
-                    file_line: Some(FileLine(file!(), line!())),
-                })
+                .map_err(Win32Error::new)
+                    .function(stringify!($f))
+                    .file_line(file!(), line!())
         }
     };
 
@@ -109,28 +112,31 @@ macro_rules! call_valid_handle_getter {
 ///
 /// # Example
 ///
-/// ```ignore
-/// unsafe {
-///     let handle = call_nonnull_handle_getter!(
-///         CreateEventA(
+/// ```no_run
+/// # extern crate winapi;
+/// # use std::ptr;
+/// # use winapi::um::synchapi::CreateEventW;
+/// # use comedy::handle::Handle;
+/// # use comedy::{call_nonnull_handle_getter, Win32Error};
+/// unsafe fn create_event(name: &[u16]) -> Result<Handle, Win32Error> {
+///     call_nonnull_handle_getter!(
+///         CreateEventW(
 ///             std::ptr::null_mut(),
 ///             0, 0,
-///             std::ptr::null_mut(),
+///             name.as_ptr(),
 ///         )
-///     )?;
+///     )
 /// }
 /// ```
 #[macro_export]
 macro_rules! call_nonnull_handle_getter {
     ($f:ident ( $($arg:expr),* )) => {
         {
-            use $crate::error::{Error, ErrorCode, FileLine, ResultExt};
+            use $crate::error::{ErrorCode, FileLine, ResultExt, Win32Error};
             $crate::handle::Handle::from_nonnull($f($($arg),*))
-                .map_err(|last_error| Win32Error {
-                    code: last_error,
-                    function: Some(stringify!($f)),
-                    file_line: Some(FileLine(file!(), line!())),
-                })
+                .map_err(Win32Error::new)
+                    .function(stringify!($f))
+                    .file_line(file!(), line!())
         }
     };
 

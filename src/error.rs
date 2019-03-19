@@ -213,10 +213,10 @@ pub trait ResultExt<T, E> {
     /// Add the source file name and line number of the call to the error.
     fn file_line(self, file: &'static str, line: u32) -> Self;
 
-    /// Replace `Err(code)` with `replacement`.
+    /// Replace `Err(code)` with `Ok(replacement)`.
     fn allow_err(self, code: Self::Code, replacement: T) -> Self;
 
-    /// Replace `Err(code)` with the result of calling `replacement()`.
+    /// Replace `Err(code)` with `Ok(replacement())`.
     fn allow_err_with<F>(self, code: Self::Code, replacement: F) -> Self
     where
         F: FnOnce() -> T;
@@ -285,11 +285,20 @@ pub fn succeeded_or_err(hr: HRESULT) -> Result<HRESULT, HResult> {
 /// the macro usage.
 ///
 /// # Example
-/// ```ignore
-/// unsafe {
-///     check_succeeded!(
-///         CoInitialize(std::ptr::null_mut())
-///     )?;
+/// ```no_run
+/// # extern crate winapi;
+/// # use std::ptr;
+/// # use winapi::um::combaseapi::CoUninitialize;
+/// # use winapi::um::objbase::CoInitialize;
+/// # use comedy::{check_succeeded, HResult};
+/// #
+/// fn coinit() -> Result<(), HResult> {
+///     unsafe {
+///         check_succeeded!(CoInitialize(ptr::null_mut()))?;
+///
+///         CoUninitialize();
+///     }
+///     Ok(())
 /// }
 /// ```
 #[macro_export]
@@ -322,17 +331,24 @@ where
     }
 }
 
-/// Call a function that returns a integer, conver to a `Result`, using `GetLastError()` if zero.
+/// Call a function that returns a integer, convert to a `Result`, using `GetLastError()` if zero.
 ///
 /// The error will be augmented with the name of the function and the file and line number of
 /// the macro usage.
 ///
 /// # Example
-/// ```ignore
-/// unsafe {
-///     check_true!(
-///         FlushFileBuffers(file)
-///     )?;
+/// ```no_run
+/// # extern crate winapi;
+/// # use winapi::shared::minwindef::BOOL;
+/// # use winapi::um::fileapi::FlushFileBuffers;
+/// # use winapi::um::winnt::HANDLE;
+/// # use comedy::{check_true, Win32Error};
+/// #
+/// fn flush(file: HANDLE) -> Result<(), Win32Error> {
+///     unsafe {
+///         check_true!(FlushFileBuffers(file))?;
+///     }
+///     Ok(())
 /// }
 /// ```
 #[macro_export]
