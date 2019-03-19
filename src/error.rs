@@ -22,7 +22,7 @@ pub struct ErrorAndSource<T: ErrorCode> {
     file_line: Option<FileLine>,
 }
 
-/// A transparent wrapper for an error code.
+/// A wrapper for an error code.
 pub trait ErrorCode:
     Copy + fmt::Debug + Eq + PartialEq + fmt::Display + Send + Sync + 'static
 {
