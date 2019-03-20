@@ -19,31 +19,15 @@ pub struct Handle(HANDLE);
 
 impl Handle {
     /// Take ownership of a `HANDLE`, which will be closed with `CloseHandle` upon drop.
-    /// Checks for `INVALID_HANDLE_VALUE` but not `NULL`.
+    /// Returns an error in case of `INVALID_HANDLE_VALUE` or `NULL`.
     ///
     /// # Safety
     ///
     /// `h` should be the only copy of the handle. `GetLastError()` is called to
     /// return an error, so the last Windows API called on this thread should have been
     /// what produced the invalid handle.
-    pub unsafe fn from_valid(h: HANDLE) -> Result<Handle, DWORD> {
-        if h == INVALID_HANDLE_VALUE {
-            Err(GetLastError())
-        } else {
-            Ok(Handle(h))
-        }
-    }
-
-    /// Take ownership of a `HANDLE`, which will be closed with `CloseHandle` upon drop.
-    /// Checks for `NULL` but not `INVALID_HANDLE_VALUE`.
-    ///
-    /// # Safety
-    ///
-    /// `h` should be the only copy of the handle. `GetLastError()` is called to
-    /// return an error, so the last Windows API called on this thread should have been
-    /// what produced the invalid handle.
-    pub unsafe fn from_nonnull(h: HANDLE) -> Result<Handle, DWORD> {
-        if h == NULL {
+    pub unsafe fn new(h: HANDLE) -> Result<Handle, DWORD> {
+        if h == NULL || h == INVALID_HANDLE_VALUE {
             Err(GetLastError())
         } else {
             Ok(Handle(h))
@@ -68,7 +52,7 @@ impl Drop for Handle {
     }
 }
 
-/// Call a function that returns a `HANDLE` (`INVALID_HANDLE_VALUE` on failure), wrap result.
+/// Call a function that returns a `HANDLE` (`NULL` or `INVALID_HANDLE_VALUE` on failure), wrap result.
 ///
 /// The handle is wrapped in a [`Handle`](handle/struct.Handle.html) which will automatically call
 /// `CloseHandle()` on it. If the function fails, the error is retrieved via `GetLastError()` and
@@ -82,18 +66,18 @@ impl Drop for Handle {
 /// # use winapi::um::fileapi::FindFirstFileW;
 /// # use winapi::um::minwinbase::WIN32_FIND_DATAW;
 /// # use comedy::handle::Handle;
-/// # use comedy::{call_valid_handle_getter, Win32Error};
+/// # use comedy::{call_handle_getter, Win32Error};
 /// #
 /// unsafe fn find_first(name: &[u16], data: &mut WIN32_FIND_DATAW) -> Result<Handle, Win32Error> {
-///     call_valid_handle_getter!(FindFirstFileW(name.as_ptr(), data))
+///     call_handle_getter!(FindFirstFileW(name.as_ptr(), data))
 /// }
 /// ```
 #[macro_export]
-macro_rules! call_valid_handle_getter {
+macro_rules! call_handle_getter {
     ($f:ident ( $($arg:expr),* )) => {
         {
             use $crate::error::{ErrorCode, FileLine, ResultExt, Win32Error};
-            $crate::handle::Handle::from_valid($f($($arg),*))
+            $crate::handle::Handle::new($f($($arg),*))
                 .map_err(Win32Error::new)
                     .function(stringify!($f))
                     .file_line(file!(), line!())
@@ -103,47 +87,5 @@ macro_rules! call_valid_handle_getter {
     // support for trailing comma in argument list
     ($f:ident ( $($arg:expr),+ , )) => {
         $crate::call_valid_handle_getter!($f($($arg),*))
-    };
-}
-
-/// Call a function that returns a `HANDLE` (`NULL` on failure), wrap result.
-///
-/// The handle is wrapped in a [`Handle`](handle/struct.Handle.html) which will automatically call
-/// `CloseHandle()` on it. If the function fails, the error is retrieved via `GetLastError()` and
-/// augmented with the name of the function and the file and line number of the macro usage.
-///
-/// # Example
-///
-/// ```no_run
-/// # extern crate winapi;
-/// # use std::ptr;
-/// # use winapi::um::synchapi::CreateEventW;
-/// # use comedy::handle::Handle;
-/// # use comedy::{call_nonnull_handle_getter, Win32Error};
-/// unsafe fn create_event(name: &[u16]) -> Result<Handle, Win32Error> {
-///     call_nonnull_handle_getter!(
-///         CreateEventW(
-///             std::ptr::null_mut(),
-///             0, 0,
-///             name.as_ptr(),
-///         )
-///     )
-/// }
-/// ```
-#[macro_export]
-macro_rules! call_nonnull_handle_getter {
-    ($f:ident ( $($arg:expr),* )) => {
-        {
-            use $crate::error::{ErrorCode, FileLine, ResultExt, Win32Error};
-            $crate::handle::Handle::from_nonnull($f($($arg),*))
-                .map_err(Win32Error::new)
-                    .function(stringify!($f))
-                    .file_line(file!(), line!())
-        }
-    };
-
-    // support for trailing comma in argument list
-    ($f:ident ( $($arg:expr),+ , )) => {
-        $crate::call_nonnull_handle_getter!($f($($arg),*))
     };
 }

@@ -40,5 +40,4 @@ version = "0.3.6"
 features = ["bits",
             "fileapi",
             "guiddef",
-            "synchapi",
             ]
