@@ -13,6 +13,7 @@ use std::mem;
 use std::ops::Deref;
 use std::ptr::{self, null_mut, NonNull};
 use std::rc::Rc;
+use std::slice;
 
 use winapi::shared::minwindef::LPVOID;
 use winapi::shared::{
@@ -438,6 +439,9 @@ macro_rules! com_call_taskmem_getter {
 }
 
 /// A Windows COM task memory pointer that will be automatically freed.
+// I have only found this useful with strings, so that is the only access provided here by
+// `as_slice_until_null()`. `Deref<Target=T>` would not be generally useful as task memory
+// is usually encountered as variable length structures.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct CoTaskMem<T>(NonNull<T>);
@@ -451,24 +455,6 @@ impl<T> CoTaskMem<T> {
     pub unsafe fn new(p: NonNull<T>) -> CoTaskMem<T> {
         CoTaskMem(p)
     }
-
-    /// Obtains the raw pointer without transferring ownership.
-    ///
-    /// Do __not__ free this pointer because it is still owned by the `CoTaskMem`.
-    ///
-    /// Do __not__ use this pointer beyond the lifetime of the `CoTaskMem`.
-    pub fn as_raw(&self) -> NonNull<T> {
-        self.0
-    }
-
-    /// Obtains the raw pointer without transferring ownership.
-    ///
-    /// Do __not__ free this pointer because it is still owned by the `CoTaskMem`.
-    ///
-    /// Do __not__ use this pointer beyond the lifetime of the `CoTaskMem`.
-    pub fn as_raw_ptr(&self) -> *mut T {
-        self.0.as_ptr()
-    }
 }
 
 impl<T> Drop for CoTaskMem<T> {
@@ -476,5 +462,17 @@ impl<T> Drop for CoTaskMem<T> {
         unsafe {
             CoTaskMemFree(self.0.as_ptr() as LPVOID);
         }
+    }
+}
+
+impl CoTaskMem<u16> {
+    /// Interpret as a null-terminated `u16` array, return as a slice without terminator.
+    pub unsafe fn as_slice_until_null(&self) -> &[u16] {
+        for i in 0.. {
+            if *self.0.as_ptr().offset(i) == 0 {
+                return slice::from_raw_parts(self.0.as_ptr(), i as usize);
+            }
+        }
+        unreachable!()
     }
 }
