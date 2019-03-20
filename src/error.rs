@@ -11,7 +11,9 @@ use std::fmt;
 use failure::Fail;
 
 use winapi::shared::minwindef::DWORD;
-use winapi::shared::winerror::{FACILITY_WIN32, HRESULT, HRESULT_FROM_WIN32, SUCCEEDED};
+use winapi::shared::winerror::{
+    ERROR_SUCCESS, FACILITY_WIN32, HRESULT, HRESULT_FROM_WIN32, SUCCEEDED, S_OK,
+};
 use winapi::um::errhandlingapi::GetLastError;
 
 /// An error code, optionally with information about the failing call.
@@ -172,15 +174,20 @@ impl HResult {
     ///
     /// Returns the original `HResult` as an error on failure.
     pub fn try_into_win32_err(self) -> Result<Win32Error, Self> {
-        if self.extract_facility() == FACILITY_WIN32 {
-            Ok(Win32Error {
-                code: Win32ErrorInner(self.extract_code() as DWORD),
-                function: self.function,
-                file_line: self.file_line,
-            })
+        let code = if self.code() == S_OK {
+            // Special case, facility is not set.
+            ERROR_SUCCESS
+        } else if self.extract_facility() == FACILITY_WIN32 {
+            self.extract_code() as DWORD
         } else {
-            Err(self)
-        }
+            return Err(self);
+        };
+
+        Ok(Win32Error {
+            code: Win32ErrorInner(code),
+            function: self.function,
+            file_line: self.file_line,
+        })
     }
 }
 
