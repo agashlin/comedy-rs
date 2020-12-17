@@ -1,6 +1,6 @@
 [package]
 name = "comedy"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Adam Gashlin <agashlin@mozilla.com>"]
 description = "Windows error handling, COM, and handles"
 keywords = ["windows", "com", "win32"]
